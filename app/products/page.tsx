@@ -1,12 +1,51 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import AppLayout from "@/components/layout/app-layout";
 import { formatCurrency, getStatusColor } from "@/lib/utils";
 import Link from "next/link";
+import Modal from "@/components/ui/modal";
+import Pagination from "@/components/ui/pagination";
+
+interface ProductVariant {
+  id: string;
+  sku: string;
+  size: string | null;
+  color: string | null;
+  material: string | null;
+  purchaseCost: number;
+  sellingPrice: number;
+  currentStock: number;
+  minimumStock: number;
+}
+
+interface Product {
+  id: string;
+  name: string;
+  sku: string;
+  category: string;
+  brand: string;
+  variantCount: number;
+  cost: number;
+  price: number;
+  stock: number;
+  status: string;
+  thumbnail: string | null;
+}
+
+interface ProductDetail {
+  id: string;
+  name: string;
+  sku: string;
+  description: string | null;
+  image: string | null;
+  category: { id: string; name: string } | null;
+  brand: { id: string; name: string } | null;
+  variants: ProductVariant[];
+}
 
 export default function ProductsPage() {
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -16,13 +55,15 @@ export default function ProductsPage() {
   const [brand, setBrand] = useState("");
   const [stockStatus, setStockStatus] = useState("");
 
-  const sampleProducts = [
-    { id: "1", name: "Premium Leather Loafer", sku: "AY-LFR-001", category: "Formal", variantCount: "4 sizes, 2 colors", cost: 2200, price: 3800, stock: 85, status: "In Stock", statusColor: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    { id: "2", name: "Classic Oxford Lace-up", sku: "AY-OXF-042", category: "Formal", variantCount: "5 sizes, 1 color", cost: 2500, price: 4200, stock: 12, status: "Low Stock", statusColor: "bg-amber-50 text-amber-700 border-amber-200" },
-    { id: "3", name: "Everyday Suede Chukka", sku: "AY-CHK-019", category: "Casual", variantCount: "3 sizes, 3 colors", cost: 1800, price: 3100, stock: 0, status: "Out of Stock", statusColor: "bg-rose-50 text-rose-700 border-rose-200" },
-  ];
+  const [viewProduct, setViewProduct] = useState<ProductDetail | null>(null);
+  const [editProduct, setEditProduct] = useState<ProductDetail | null>(null);
+  const [adjustProduct, setAdjustProduct] = useState<ProductDetail | null>(null);
+  const [adjustVariant, setAdjustVariant] = useState<string>("");
+  const [adjustQty, setAdjustQty] = useState<string>("");
+  const [adjustType, setAdjustType] = useState<"increase" | "decrease">("increase");
+  const [saving, setSaving] = useState(false);
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -44,13 +85,101 @@ export default function ProductsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, search, category, brand, stockStatus]);
 
   useEffect(() => {
     fetchProducts();
-  }, [page, category, brand, stockStatus]);
+  }, [fetchProducts]);
 
-  const displayProducts = products.length > 0 ? products : sampleProducts;
+  const fetchProductDetail = async (id: string): Promise<ProductDetail | null> => {
+    try {
+      const res = await fetch(`/api/products/${id}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  };
+
+  const handleView = async (productId: string) => {
+    const detail = await fetchProductDetail(productId);
+    if (detail) setViewProduct(detail);
+  };
+
+  const handleEdit = async (productId: string) => {
+    const detail = await fetchProductDetail(productId);
+    if (detail) setEditProduct(detail);
+  };
+
+  const handleEditSave = async () => {
+    if (!editProduct) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/products/${editProduct.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editProduct.name,
+          sku: editProduct.sku,
+          description: editProduct.description,
+        }),
+      });
+      if (res.ok) {
+        setEditProduct(null);
+        fetchProducts();
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAdjustStock = async (productId: string) => {
+    const detail = await fetchProductDetail(productId);
+    if (detail) {
+      setAdjustProduct(detail);
+      if (detail.variants.length > 0) {
+        setAdjustVariant(detail.variants[0].id);
+      }
+      setAdjustQty("");
+      setAdjustType("increase");
+    }
+  };
+
+  const handleAdjustSave = async () => {
+    if (!adjustProduct || !adjustVariant || !adjustQty) return;
+    setSaving(true);
+    try {
+      const selectedVariant = adjustProduct.variants.find((v) => v.id === adjustVariant);
+      if (!selectedVariant) return;
+
+      const qty = parseInt(adjustQty);
+      if (isNaN(qty) || qty <= 0) return;
+
+      const newStock =
+        adjustType === "increase"
+          ? selectedVariant.currentStock + qty
+          : Math.max(0, selectedVariant.currentStock - qty);
+
+      await fetch(`/api/products/${adjustProduct.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: adjustProduct.name, sku: adjustProduct.sku }),
+      });
+
+      setAdjustProduct(null);
+      fetchProducts();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteProduct = async (id: string) => {
+    if (!confirm("Are you sure you want to archive this product?")) return;
+    try {
+      await fetch(`/api/products/${id}`, { method: "DELETE" });
+      fetchProducts();
+    } catch {}
+  };
 
   return (
     <AppLayout title="Product Management">
@@ -123,7 +252,7 @@ export default function ProductsPage() {
               </tr>
             </thead>
             <tbody>
-              {(loading ? [] : displayProducts).map((product: any) => (
+              {(loading ? [] : products).map((product) => (
                 <tr
                   key={product.id}
                   className="border-b border-[var(--outline-variant,#e0e0e0)] last:border-b-0 hover:bg-[var(--surface-container-low,#fafafa)] transition-colors"
@@ -142,7 +271,7 @@ export default function ProductsPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-[var(--on-surface-variant,#666)] font-mono">{product.sku}</td>
                   <td className="px-4 py-3 text-sm text-[var(--on-surface-variant,#666)]">{product.category}</td>
-                  <td className="px-4 py-3 text-sm text-[var(--on-surface-variant,#666)]">{typeof product.variantCount === "number" ? `${product.variantCount} variants` : product.variantCount}</td>
+                  <td className="px-4 py-3 text-sm text-[var(--on-surface-variant,#666)]">{product.variantCount} variants</td>
                   <td className="px-4 py-3 text-sm text-[var(--on-surface-variant,#666)] text-right">{formatCurrency(Number(product.cost))}</td>
                   <td className="px-4 py-3 text-sm text-[var(--on-surface,#1a1a1a)] font-medium text-right">{formatCurrency(Number(product.price))}</td>
                   <td className="px-4 py-3 text-sm text-[var(--on-surface,#1a1a1a)] font-medium text-right">{product.stock}</td>
@@ -153,20 +282,32 @@ export default function ProductsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-center gap-1">
-                      <button className="p-1.5 rounded-lg hover:bg-[var(--surface-container,#f5f5f5)] transition-colors" title="Edit">
+                      <button
+                        onClick={() => handleEdit(product.id)}
+                        className="p-1.5 rounded-lg hover:bg-[var(--surface-container,#f5f5f5)] transition-colors"
+                        title="Edit"
+                      >
                         <span className="material-symbols-outlined text-[var(--on-surface-variant,#666)] text-lg">edit</span>
                       </button>
-                      <button className="p-1.5 rounded-lg hover:bg-[var(--surface-container,#f5f5f5)] transition-colors" title="View">
+                      <button
+                        onClick={() => handleView(product.id)}
+                        className="p-1.5 rounded-lg hover:bg-[var(--surface-container,#f5f5f5)] transition-colors"
+                        title="View"
+                      >
                         <span className="material-symbols-outlined text-[var(--on-surface-variant,#666)] text-lg">visibility</span>
                       </button>
-                      <button className="p-1.5 rounded-lg hover:bg-[var(--surface-container,#f5f5f5)] transition-colors" title="Adjust Stock">
+                      <button
+                        onClick={() => handleAdjustStock(product.id)}
+                        className="p-1.5 rounded-lg hover:bg-[var(--surface-container,#f5f5f5)] transition-colors"
+                        title="Adjust Stock"
+                      >
                         <span className="material-symbols-outlined text-[var(--on-surface-variant,#666)] text-lg">tune</span>
                       </button>
                     </div>
                   </td>
                 </tr>
               ))}
-              {!loading && displayProducts.length === 0 && (
+              {!loading && products.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-4 py-12 text-center text-[var(--on-surface-variant,#999)]">
                     <span className="material-symbols-outlined text-4xl mb-2 block">inventory_2</span>
@@ -177,32 +318,228 @@ export default function ProductsPage() {
             </tbody>
           </table>
 
-          <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--outline-variant,#e0e0e0)] bg-[var(--surface-container,#f5f5f5)]">
-            <span className="text-sm text-[var(--on-surface-variant,#666)]">
-              Showing {displayProducts.length} of {total || displayProducts.length} products
-            </span>
-            <div className="flex items-center gap-2">
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            total={total}
+            showingCount={products.length}
+            itemName="products"
+          />
+        </div>
+      </div>
+
+      <Modal isOpen={!!viewProduct} onClose={() => setViewProduct(null)} title="Product Details" size="lg">
+        {viewProduct && (
+          <div className="space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-20 h-20 rounded-xl bg-[var(--surface-container,#f5f5f5)] flex items-center justify-center overflow-hidden">
+                {viewProduct.image ? (
+                  <img src={viewProduct.image} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="material-symbols-outlined text-3xl text-[var(--on-surface-variant,#999)]">inventory_2</span>
+                )}
+              </div>
+              <div>
+                <h3 className="text-xl font-semibold text-[var(--on-surface,#1a1a1a)]">{viewProduct.name}</h3>
+                <p className="text-sm text-[var(--on-surface-variant,#666)]">SKU: {viewProduct.sku}</p>
+                {viewProduct.description && (
+                  <p className="text-sm text-[var(--on-surface-variant,#666)] mt-1">{viewProduct.description}</p>
+                )}
+                <div className="flex gap-3 mt-2">
+                  {viewProduct.category && (
+                    <span className="text-xs px-2 py-1 bg-[var(--surface-container,#f5f5f5)] rounded-full text-[var(--on-surface-variant,#666)]">
+                      {viewProduct.category.name}
+                    </span>
+                  )}
+                  {viewProduct.brand && (
+                    <span className="text-xs px-2 py-1 bg-[var(--surface-container,#f5f5f5)] rounded-full text-[var(--on-surface-variant,#666)]">
+                      {viewProduct.brand.name}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-[var(--on-surface-variant,#666)] mb-3">Variants ({viewProduct.variants.length})</h4>
+              {viewProduct.variants.length === 0 ? (
+                <p className="text-sm text-[var(--on-surface-variant,#999)]">No variants</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[var(--outline-variant,#e0e0e0)]">
+                        <th className="text-left py-2 text-[var(--on-surface-variant,#666)] font-medium">SKU</th>
+                        <th className="text-left py-2 text-[var(--on-surface-variant,#666)] font-medium">Size</th>
+                        <th className="text-left py-2 text-[var(--on-surface-variant,#666)] font-medium">Color</th>
+                        <th className="text-right py-2 text-[var(--on-surface-variant,#666)] font-medium">Cost</th>
+                        <th className="text-right py-2 text-[var(--on-surface-variant,#666)] font-medium">Price</th>
+                        <th className="text-right py-2 text-[var(--on-surface-variant,#666)] font-medium">Stock</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {viewProduct.variants.map((v) => (
+                        <tr key={v.id} className="border-b border-[var(--outline-variant,#e0e0e0)] last:border-b-0">
+                          <td className="py-2 font-mono text-[var(--on-surface,#1a1a1a)]">{v.sku}</td>
+                          <td className="py-2 text-[var(--on-surface-variant,#666)]">{v.size || "-"}</td>
+                          <td className="py-2 text-[var(--on-surface-variant,#666)]">{v.color || "-"}</td>
+                          <td className="py-2 text-right text-[var(--on-surface-variant,#666)]">{formatCurrency(Number(v.purchaseCost))}</td>
+                          <td className="py-2 text-right text-[var(--on-surface,#1a1a1a)] font-medium">{formatCurrency(Number(v.sellingPrice))}</td>
+                          <td className="py-2 text-right">
+                            <span className={`font-medium ${v.currentStock === 0 ? "text-rose-600" : v.currentStock <= (v.minimumStock || 0) ? "text-amber-600" : "text-[var(--on-surface,#1a1a1a)]"}`}>
+                              {v.currentStock}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end">
               <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-3 py-1.5 text-sm border border-[var(--outline,#ccc)] rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--surface-container-highest,#e8e8e8)] transition-colors"
+                onClick={() => setViewProduct(null)}
+                className="px-4 py-2 border border-[var(--outline,#ccc)] rounded-lg text-[var(--on-surface,#1a1a1a)] hover:bg-[var(--surface-container,#f5f5f5)] transition-colors"
               >
-                Previous
-              </button>
-              <span className="text-sm text-[var(--on-surface-variant,#666)]">
-                Page {page} of {totalPages}
-              </span>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="px-3 py-1.5 text-sm border border-[var(--outline,#ccc)] rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--surface-container-highest,#e8e8e8)] transition-colors"
-              >
-                Next
+                Close
               </button>
             </div>
           </div>
-        </div>
-      </div>
+        )}
+      </Modal>
+
+      <Modal isOpen={!!editProduct} onClose={() => setEditProduct(null)} title="Edit Product">
+        {editProduct && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-[var(--on-surface-variant,#666)] mb-1">Product Name</label>
+              <input
+                type="text"
+                value={editProduct.name}
+                onChange={(e) => setEditProduct({ ...editProduct, name: e.target.value })}
+                className="w-full px-3 py-2 border border-[var(--outline,#ccc)] rounded-lg bg-white text-[var(--on-surface,#1a1a1a)] focus:outline-none focus:ring-2 focus:ring-[var(--primary,#6750a4)]"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-[var(--on-surface-variant,#666)] mb-1">SKU</label>
+              <input
+                type="text"
+                value={editProduct.sku}
+                onChange={(e) => setEditProduct({ ...editProduct, sku: e.target.value })}
+                className="w-full px-3 py-2 border border-[var(--outline,#ccc)] rounded-lg bg-white text-[var(--on-surface,#1a1a1a)] focus:outline-none focus:ring-2 focus:ring-[var(--primary,#6750a4)]"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-[var(--on-surface-variant,#666)] mb-1">Description</label>
+              <textarea
+                value={editProduct.description || ""}
+                onChange={(e) => setEditProduct({ ...editProduct, description: e.target.value })}
+                rows={3}
+                className="w-full px-3 py-2 border border-[var(--outline,#ccc)] rounded-lg bg-white text-[var(--on-surface,#1a1a1a)] focus:outline-none focus:ring-2 focus:ring-[var(--primary,#6750a4)]"
+              />
+            </div>
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                onClick={() => setEditProduct(null)}
+                className="px-4 py-2 border border-[var(--outline,#ccc)] rounded-lg text-[var(--on-surface,#1a1a1a)] hover:bg-[var(--surface-container,#f5f5f5)] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSave}
+                disabled={saving}
+                className="px-4 py-2 bg-[var(--primary,#6750a4)] text-white rounded-lg hover:bg-[var(--primary,#6750a4)]/90 transition-colors font-medium disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal isOpen={!!adjustProduct} onClose={() => setAdjustProduct(null)} title="Adjust Stock">
+        {adjustProduct && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--on-surface-variant,#666)]">
+              Adjust stock for <strong className="text-[var(--on-surface,#1a1a1a)]">{adjustProduct.name}</strong>
+            </p>
+
+            {adjustProduct.variants.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-[var(--on-surface-variant,#666)] mb-1">Select Variant</label>
+                <select
+                  value={adjustVariant}
+                  onChange={(e) => setAdjustVariant(e.target.value)}
+                  className="w-full px-3 py-2 border border-[var(--outline,#ccc)] rounded-lg bg-white text-[var(--on-surface,#1a1a1a)] focus:outline-none focus:ring-2 focus:ring-[var(--primary,#6750a4)]"
+                >
+                  {adjustProduct.variants.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.sku} {v.size ? `- ${v.size}` : ""} {v.color ? `/ ${v.color}` : ""} (Stock: {v.currentStock})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-[var(--on-surface-variant,#666)] mb-1">Adjustment Type</label>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setAdjustType("increase")}
+                  className={`flex-1 px-4 py-2 rounded-lg border font-medium transition-colors ${
+                    adjustType === "increase"
+                      ? "bg-emerald-50 border-emerald-300 text-emerald-700"
+                      : "border-[var(--outline,#ccc)] text-[var(--on-surface-variant,#666)] hover:bg-[var(--surface-container,#f5f5f5)]"
+                  }`}
+                >
+                  + Increase
+                </button>
+                <button
+                  onClick={() => setAdjustType("decrease")}
+                  className={`flex-1 px-4 py-2 rounded-lg border font-medium transition-colors ${
+                    adjustType === "decrease"
+                      ? "bg-rose-50 border-rose-300 text-rose-700"
+                      : "border-[var(--outline,#ccc)] text-[var(--on-surface-variant,#666)] hover:bg-[var(--surface-container,#f5f5f5)]"
+                  }`}
+                >
+                  - Decrease
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[var(--on-surface-variant,#666)] mb-1">Quantity</label>
+              <input
+                type="number"
+                min="1"
+                value={adjustQty}
+                onChange={(e) => setAdjustQty(e.target.value)}
+                placeholder="Enter quantity"
+                className="w-full px-3 py-2 border border-[var(--outline,#ccc)] rounded-lg bg-white text-[var(--on-surface,#1a1a1a)] focus:outline-none focus:ring-2 focus:ring-[var(--primary,#6750a4)]"
+              />
+            </div>
+
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                onClick={() => setAdjustProduct(null)}
+                className="px-4 py-2 border border-[var(--outline,#ccc)] rounded-lg text-[var(--on-surface,#1a1a1a)] hover:bg-[var(--surface-container,#f5f5f5)] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAdjustSave}
+                disabled={saving || !adjustQty || parseInt(adjustQty) <= 0}
+                className="px-4 py-2 bg-[var(--primary,#6750a4)] text-white rounded-lg hover:bg-[var(--primary,#6750a4)]/90 transition-colors font-medium disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Apply Adjustment"}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </AppLayout>
   );
 }
