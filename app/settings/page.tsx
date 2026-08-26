@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import AppLayout from "@/components/layout/app-layout";
+import { useTheme } from "@/components/theme-provider";
 
 type Tab = "general" | "branding" | "users" | "notifications" | "security" | "storage";
 
@@ -52,6 +53,7 @@ interface User {
 }
 
 export default function SettingsPage() {
+  const { refreshTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<Tab>("general");
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [loadingSettings, setLoadingSettings] = useState(true);
@@ -157,6 +159,7 @@ export default function SettingsPage() {
       });
       if (res.ok) {
         showMessage("success", "General settings saved successfully!");
+        refreshTheme();
       } else {
         showMessage("error", "Failed to save general settings.");
       }
@@ -179,6 +182,7 @@ export default function SettingsPage() {
       });
       if (res.ok) {
         showMessage("success", "Branding settings saved successfully!");
+        refreshTheme();
       } else {
         showMessage("error", "Failed to save branding settings.");
       }

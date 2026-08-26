@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --dynamic-primary: #4f46e5;
+  --dynamic-secondary: #565e74;
+  --dynamic-primary-container: #4f46e520;
+  --dynamic-primary-hover: #4f46e5e6;
+}
+
 @layer base {
   body {
     font-family: 'Plus Jakarta Sans', sans-serif;
@@ -33,4 +40,38 @@
     background: #e4e1ee;
     border-radius: 4px;
   }
+}
+
+/* Theme color transitions — only specific properties to avoid jank */
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease both;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 0.35s ease both;
+}
+
+.animate-slide-in-up {
+  animation: slideInUp 0.35s ease both;
 }

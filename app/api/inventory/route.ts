@@ -1,46 +1,86 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const inventoryData = [
-  { id: "1", product: "Classic Oxford Brogue", productId: "p1", variant: "Tan / 42", sku: "OXF-TAN-42", currentStock: 145, minLevel: 50, purchaseCost: 2200, retailPrice: 3960, status: "In Stock" },
-  { id: "2", product: "Suede Chelsea Boot", productId: "p2", variant: "Navy / 44", sku: "CHL-NVY-44", currentStock: 18, minLevel: 25, purchaseCost: 2500, retailPrice: 4500, status: "Low Stock" },
-  { id: "3", product: "Leather Loafer", productId: "p3", variant: "Black / 41", sku: "LFR-BLK-41", currentStock: 88, minLevel: 30, purchaseCost: 2000, retailPrice: 3600, status: "In Stock" },
-  { id: "4", product: "Handstitched Monk Strap", productId: "p4", variant: "Oxblood / 43", sku: "MNK-OXB-43", currentStock: 0, minLevel: 15, purchaseCost: 2800, retailPrice: 5040, status: "Out of Stock" },
-  { id: "5", product: "Minimalist Sneaker", productId: "p5", variant: "White / 42", sku: "SNK-WHT-42", currentStock: 210, minLevel: 100, purchaseCost: 1500, retailPrice: 2700, status: "In Stock" },
-];
-
-function computeStatus(item: { currentStock: number; minLevel: number }) {
-  if (item.currentStock === 0) return "Out of Stock";
-  if (item.currentStock < item.minLevel) return "Low Stock";
-  return "In Stock";
-}
+import { prisma } from "@/lib/prisma";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const tab = searchParams.get("tab") || "all";
+  const page = parseInt(searchParams.get("page") || "1");
+  const limit = parseInt(searchParams.get("limit") || "20");
+  const status = searchParams.get("status");
+  const search = searchParams.get("search") || "";
+  const skip = (page - 1) * limit;
 
-  let items = inventoryData.map((item) => ({
-    ...item,
-    value: item.currentStock * item.purchaseCost,
-    status: computeStatus(item),
-  }));
+  // Get org
+  const org = await prisma.organization.findFirst();
+  const organizationId = org?.id || "default";
 
-  if (tab === "low-stock") {
-    items = items.filter((i) => i.status === "Low Stock");
-  } else if (tab === "out-of-stock") {
-    items = items.filter((i) => i.status === "Out of Stock");
+  // Build where clause for variants
+  const where: any = {
+    product: { organizationId, status: "active" },
+  };
+
+  if (search) {
+    where.OR = [
+      { sku: { contains: search } },
+      { product: { name: { contains: search } } },
+    ];
   }
 
-  const totalUnits = items.reduce((sum, i) => sum + i.currentStock, 0);
-  const totalValue = items.reduce((sum, i) => sum + i.value, 0);
+  const variants = await prisma.productVariant.findMany({
+    where,
+    include: {
+      product: {
+        select: { name: true, id: true },
+      },
+    },
+    skip,
+    take: limit,
+    orderBy: { createdAt: "desc" },
+  });
+
+  const total = await prisma.productVariant.count({ where });
+
+  // Map to inventory items
+  const items = variants.map((v) => {
+    const stock = v.currentStock || 0;
+    const min = v.minimumStock || 0;
+    let status = "In Stock";
+    if (stock === 0) status = "Out of Stock";
+    else if (min > 0 && stock <= min) status = "Low Stock";
+
+    return {
+      id: v.id,
+      productId: v.product.id,
+      product: v.product.name,
+      variant: [v.size, v.color, v.material].filter(Boolean).join(" / ") || "Default",
+      sku: v.sku,
+      currentStock: stock,
+      minLevel: min,
+      purchaseCost: Number(v.purchaseCost || 0),
+      retailPrice: Number(v.sellingPrice || 0),
+      value: stock * Number(v.purchaseCost || 0),
+      status,
+    };
+  });
+
+  // Stats
+  const allVariants = await prisma.productVariant.findMany({
+    where: { product: { organizationId, status: "active" } },
+    select: { currentStock: true, purchaseCost: true, sellingPrice: true, minimumStock: true },
+  });
+
+  const stats = {
+    totalUnits: allVariants.reduce((s, v) => s + (v.currentStock || 0), 0),
+    inventoryCost: allVariants.reduce((s, v) => s + (v.currentStock || 0) * Number(v.purchaseCost || 0), 0),
+    retailValue: allVariants.reduce((s, v) => s + (v.currentStock || 0) * Number(v.sellingPrice || 0), 0),
+    lowStockCount: allVariants.filter((v) => (v.currentStock || 0) > 0 && (v.minimumStock || 0) > 0 && (v.currentStock || 0) <= (v.minimumStock || 0)).length,
+    outOfStockCount: allVariants.filter((v) => (v.currentStock || 0) === 0).length,
+    productCount: allVariants.length,
+  };
 
   return NextResponse.json({
     items,
-    summary: {
-      totalItems: items.length,
-      totalUnits,
-      totalValue,
-      lowStock: items.filter((i) => i.status === "Low Stock").length,
-      outOfStock: items.filter((i) => i.status === "Out of Stock").length,
-    },
+    stats,
+    total,
+    totalPages: Math.ceil(total / limit),
   });
 }
