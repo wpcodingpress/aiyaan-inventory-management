@@ -1,38 +1,79 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import AppLayout from "@/components/layout/app-layout";
+import ActionMenu from "@/components/ui/action-menu";
+import Pagination from "@/components/ui/pagination";
+import Modal from "@/components/ui/modal";
+import { formatCurrency, getStatusColor } from "@/lib/utils";
 
-const sampleSales = [
-  { id: "1", saleNumber: "SO-2024-001", customer: "Bata Retailers Ltd.", customerType: "Wholesale Partner", date: "2024-07-10", items: "Premium Leather Loafer (x50)", itemCount: 3, total: 245000, paid: 245000, due: 0, paymentStatus: "Paid", status: "Completed" },
-  { id: "2", saleNumber: "SO-2024-002", customer: "Apex Footwear", customerType: "Distributor", date: "2024-07-18", items: "Urban Casual Sneaker (x120)", itemCount: 2, total: 310000, paid: 200000, due: 110000, paymentStatus: "Partial", status: "Completed" },
-  { id: "3", saleNumber: "SO-2024-003", customer: "Lotto Outlets", customerType: "Retail Chain", date: "2024-07-25", items: "Classic Formal Shoe (x30)", itemCount: 1, total: 85500, paid: 0, due: 85500, paymentStatus: "Unpaid", status: "Completed" },
-];
-
-const paymentStatusColors: Record<string, string> = {
-  Paid: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-  Partial: "bg-amber-50 text-amber-700 border border-amber-200",
-  Unpaid: "bg-rose-50 text-rose-700 border border-rose-200",
-};
-
-const statusColors: Record<string, string> = {
-  Completed: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-  Draft: "bg-amber-50 text-amber-700 border border-amber-200",
-  Cancelled: "bg-rose-50 text-rose-700 border border-rose-200",
-};
+interface Sale {
+  id: string;
+  saleNumber: string;
+  customer: string;
+  customerType?: string;
+  date: string;
+  itemCount: number;
+  total: number;
+  paid: number;
+  due: number;
+  paymentStatus: string;
+  status: string;
+}
 
 export default function SalesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [viewSale, setViewSale] = useState<Sale | null>(null);
 
   const statuses = ["all", "Paid", "Partial", "Unpaid"];
-  const filtered = sampleSales.filter((s) => {
-    if (statusFilter !== "all" && s.paymentStatus !== statusFilter) return false;
-    if (dateFrom && s.date < dateFrom) return false;
-    if (dateTo && s.date > dateTo) return false;
-    return true;
-  });
+  const limit = 10;
+
+  const fetchSales = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (statusFilter !== "all") params.set("paymentStatus", statusFilter);
+      if (dateFrom) params.set("startDate", dateFrom);
+      if (dateTo) params.set("endDate", dateTo);
+      const res = await fetch(`/api/sales?${params}`);
+      const data = await res.json();
+      setSales(data.sales ?? data.data ?? []);
+      setTotalPages(data.totalPages ?? Math.ceil((data.total ?? 0) / limit));
+      setTotal(data.total ?? 0);
+    } catch {
+      setSales([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, statusFilter, dateFrom, dateTo, limit]);
+
+  useEffect(() => { fetchSales(); }, [fetchSales]);
+
+  useEffect(() => { setPage(1); }, [statusFilter, dateFrom, dateTo]);
+
+  const handleCancel = async (id: string) => {
+    if (!confirm("Are you sure you want to cancel this sale?")) return;
+    try {
+      await fetch(`/api/sales/${id}`, { method: "DELETE" });
+      fetchSales();
+    } catch { /* empty */ }
+  };
+
+  const getPaymentBadge = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "paid": return "bg-emerald-50 text-emerald-700 border border-emerald-200";
+      case "partial": return "bg-amber-50 text-amber-700 border border-amber-200";
+      case "unpaid": return "bg-rose-50 text-rose-700 border border-rose-200";
+      default: return "bg-gray-50 text-gray-700 border border-gray-200";
+    }
+  };
 
   return (
     <AppLayout title="Sales">
@@ -102,51 +143,119 @@ export default function SalesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((sale) => (
-                  <tr key={sale.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-6 py-4 text-sm font-medium text-[#4f46e5]">{sale.saleNumber}</td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-gray-900">{sale.customer}</div>
-                      <div className="text-xs text-gray-500">{sale.customerType}</div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{sale.date}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900 text-center">{sale.itemCount}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">৳{sale.total.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600 text-right">৳{sale.paid.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">৳{sale.due.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-center">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${paymentStatusColors[sale.paymentStatus]}`}>
-                        {sale.paymentStatus}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[sale.status]}`}>
-                        {sale.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <button className="text-gray-400 hover:text-gray-600 transition-colors">
-                        <span className="material-symbols-outlined text-[18px]">more_horiz</span>
-                      </button>
+                {loading ? (
+                  <tr>
+                    <td colSpan={10} className="text-center py-12">
+                      <div className="flex items-center justify-center gap-2 text-gray-400">
+                        <span className="material-symbols-outlined text-[20px] animate-spin">progress_activity</span>
+                        Loading sales...
+                      </div>
                     </td>
                   </tr>
-                ))}
+                ) : sales.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="text-center py-12 text-gray-400">
+                      No sales found.
+                    </td>
+                  </tr>
+                ) : (
+                  sales.map((sale) => (
+                    <tr key={sale.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="px-6 py-4 text-sm font-medium text-[#4f46e5]">{sale.saleNumber}</td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-medium text-gray-900">{sale.customer}</div>
+                        {sale.customerType && <div className="text-xs text-gray-500">{sale.customerType}</div>}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">{sale.date}</td>
+                      <td className="px-6 py-4 text-sm text-gray-900 text-center">{sale.itemCount}</td>
+                      <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">{formatCurrency(sale.total)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600 text-right">{formatCurrency(sale.paid)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">{formatCurrency(sale.due)}</td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPaymentBadge(sale.paymentStatus)}`}>
+                          {sale.paymentStatus}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(sale.status.toLowerCase())}`}>
+                          {sale.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <ActionMenu
+                          items={[
+                            { label: "View Details", icon: "visibility", onClick: () => setViewSale(sale) },
+                            { label: "Edit", icon: "edit", onClick: () => { window.location.href = `/sales/new?id=${sale.id}`; } },
+                            { label: "Cancel Sale", icon: "cancel", onClick: () => handleCancel(sale.id), variant: "danger" },
+                          ]}
+                        />
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
 
-          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
-            <p className="text-sm text-gray-500">
-              Showing {filtered.length} of {sampleSales.length} sales
-            </p>
-            <div className="flex gap-1">
-              <button className="px-3 py-1 text-sm text-gray-400 cursor-not-allowed" disabled>Previous</button>
-              <button className="px-3 py-1 text-sm bg-[#4f46e5] text-white rounded">1</button>
-              <button className="px-3 py-1 text-sm text-gray-400 cursor-not-allowed" disabled>Next</button>
-            </div>
-          </div>
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            total={total}
+            showingCount={sales.length}
+            itemName="sales"
+          />
         </div>
       </div>
+
+      <Modal isOpen={!!viewSale} onClose={() => setViewSale(null)} title="Sale Details" size="lg">
+        {viewSale && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Sale #</p>
+                <p className="text-sm text-gray-900 font-medium">{viewSale.saleNumber}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Customer</p>
+                <p className="text-sm text-gray-900">{viewSale.customer}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Date</p>
+                <p className="text-sm text-gray-900">{viewSale.date}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Items</p>
+                <p className="text-sm text-gray-900">{viewSale.itemCount}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Total</p>
+                <p className="text-sm text-gray-900 font-semibold">{formatCurrency(viewSale.total)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Paid</p>
+                <p className="text-sm text-gray-900">{formatCurrency(viewSale.paid)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Due</p>
+                <p className="text-sm text-gray-900 font-semibold">{formatCurrency(viewSale.due)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Payment Status</p>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPaymentBadge(viewSale.paymentStatus)}`}>
+                  {viewSale.paymentStatus}
+                </span>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Status</p>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(viewSale.status.toLowerCase())}`}>
+                  {viewSale.status}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
     </AppLayout>
   );
 }

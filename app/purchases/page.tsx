@@ -1,34 +1,74 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import AppLayout from "@/components/layout/app-layout";
+import ActionMenu from "@/components/ui/action-menu";
+import Pagination from "@/components/ui/pagination";
+import Modal from "@/components/ui/modal";
+import { formatCurrency, getStatusColor } from "@/lib/utils";
 
-const samplePurchases = [
-  { id: "1", purchaseNumber: "PO-2024-001", supplier: "Premium Leather Goods Co.", date: "2024-06-15", itemCount: 3, total: 165000, paid: 165000, due: 0, paymentStatus: "Paid", status: "Completed" },
-  { id: "2", purchaseNumber: "PO-2024-002", supplier: "BD Leather Exports", date: "2024-07-02", itemCount: 2, total: 98000, paid: 50000, due: 48000, paymentStatus: "Partial", status: "Completed" },
-  { id: "3", purchaseNumber: "PO-2024-003", supplier: "Footwear Manufacturers Ltd.", date: "2024-07-20", itemCount: 4, total: 220000, paid: 0, due: 220000, paymentStatus: "Unpaid", status: "Draft" },
-];
-
-const paymentStatusColors: Record<string, string> = {
-  Paid: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-  Partial: "bg-amber-50 text-amber-700 border border-amber-200",
-  Unpaid: "bg-rose-50 text-rose-700 border border-rose-200",
-};
-
-const statusColors: Record<string, string> = {
-  Completed: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-  Draft: "bg-amber-50 text-amber-700 border border-amber-200",
-  Cancelled: "bg-rose-50 text-rose-700 border border-rose-200",
-};
+interface Purchase {
+  id: string;
+  purchaseNumber: string;
+  supplier: string;
+  date: string;
+  itemCount: number;
+  total: number;
+  paid: number;
+  due: number;
+  paymentStatus: string;
+  status: string;
+}
 
 export default function PurchasesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [viewPurchase, setViewPurchase] = useState<Purchase | null>(null);
 
   const statuses = ["all", "Draft", "Completed", "Cancelled"];
-  const filtered =
-    statusFilter === "all"
-      ? samplePurchases
-      : samplePurchases.filter((p) => p.status === statusFilter);
+  const limit = 10;
+
+  const fetchPurchases = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (statusFilter !== "all") params.set("status", statusFilter);
+      const res = await fetch(`/api/purchases?${params}`);
+      const data = await res.json();
+      setPurchases(data.purchases ?? data.data ?? []);
+      setTotalPages(data.totalPages ?? Math.ceil((data.total ?? 0) / limit));
+      setTotal(data.total ?? 0);
+    } catch {
+      setPurchases([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, statusFilter, limit]);
+
+  useEffect(() => { fetchPurchases(); }, [fetchPurchases]);
+
+  useEffect(() => { setPage(1); }, [statusFilter]);
+
+  const handleCancel = async (id: string) => {
+    if (!confirm("Are you sure you want to cancel this purchase?")) return;
+    try {
+      await fetch(`/api/purchases/${id}`, { method: "DELETE" });
+      fetchPurchases();
+    } catch { /* empty */ }
+  };
+
+  const getPaymentBadge = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "paid": return "bg-emerald-50 text-emerald-700 border border-emerald-200";
+      case "partial": return "bg-amber-50 text-amber-700 border border-amber-200";
+      case "unpaid": return "bg-rose-50 text-rose-700 border border-rose-200";
+      default: return "bg-gray-50 text-gray-700 border border-gray-200";
+    }
+  };
 
   return (
     <AppLayout title="Purchases">
@@ -80,48 +120,116 @@ export default function PurchasesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map((purchase) => (
-                  <tr key={purchase.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-6 py-4 text-sm font-medium text-blue-600">{purchase.purchaseNumber}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900">{purchase.supplier}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{purchase.date}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900 text-center">{purchase.itemCount}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">৳{purchase.total.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600 text-right">৳{purchase.paid.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">৳{purchase.due.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-center">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${paymentStatusColors[purchase.paymentStatus]}`}>
-                        {purchase.paymentStatus}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[purchase.status]}`}>
-                        {purchase.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <button className="text-gray-400 hover:text-gray-600 transition-colors">
-                        <span className="material-symbols-outlined text-[18px]">more_horiz</span>
-                      </button>
+                {loading ? (
+                  <tr>
+                    <td colSpan={10} className="text-center py-12">
+                      <div className="flex items-center justify-center gap-2 text-gray-400">
+                        <span className="material-symbols-outlined text-[20px] animate-spin">progress_activity</span>
+                        Loading purchases...
+                      </div>
                     </td>
                   </tr>
-                ))}
+                ) : purchases.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="text-center py-12 text-gray-400">
+                      No purchases found.
+                    </td>
+                  </tr>
+                ) : (
+                  purchases.map((purchase) => (
+                    <tr key={purchase.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="px-6 py-4 text-sm font-medium text-blue-600">{purchase.purchaseNumber}</td>
+                      <td className="px-6 py-4 text-sm text-gray-900">{purchase.supplier}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600">{purchase.date}</td>
+                      <td className="px-6 py-4 text-sm text-gray-900 text-center">{purchase.itemCount}</td>
+                      <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">{formatCurrency(purchase.total)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600 text-right">{formatCurrency(purchase.paid)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">{formatCurrency(purchase.due)}</td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPaymentBadge(purchase.paymentStatus)}`}>
+                          {purchase.paymentStatus}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(purchase.status.toLowerCase())}`}>
+                          {purchase.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <ActionMenu
+                          items={[
+                            { label: "View Details", icon: "visibility", onClick: () => setViewPurchase(purchase) },
+                            { label: "Edit", icon: "edit", onClick: () => { window.location.href = `/purchases/new?id=${purchase.id}`; } },
+                            { label: "Cancel Purchase", icon: "cancel", onClick: () => handleCancel(purchase.id), variant: "danger" },
+                          ]}
+                        />
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
 
-          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
-            <p className="text-sm text-gray-500">
-              Showing {filtered.length} of {filtered.length} purchases
-            </p>
-            <div className="flex gap-1">
-              <button className="px-3 py-1 text-sm text-gray-400 cursor-not-allowed" disabled>Previous</button>
-              <button className="px-3 py-1 text-sm bg-blue-600 text-white rounded">1</button>
-              <button className="px-3 py-1 text-sm text-gray-400 cursor-not-allowed" disabled>Next</button>
-            </div>
-          </div>
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            total={total}
+            showingCount={purchases.length}
+            itemName="purchases"
+          />
         </div>
       </div>
+
+      <Modal isOpen={!!viewPurchase} onClose={() => setViewPurchase(null)} title="Purchase Details" size="lg">
+        {viewPurchase && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Purchase #</p>
+                <p className="text-sm text-gray-900 font-medium">{viewPurchase.purchaseNumber}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Supplier</p>
+                <p className="text-sm text-gray-900">{viewPurchase.supplier}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Date</p>
+                <p className="text-sm text-gray-900">{viewPurchase.date}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Items</p>
+                <p className="text-sm text-gray-900">{viewPurchase.itemCount}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Total</p>
+                <p className="text-sm text-gray-900 font-semibold">{formatCurrency(viewPurchase.total)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Paid</p>
+                <p className="text-sm text-gray-900">{formatCurrency(viewPurchase.paid)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Due</p>
+                <p className="text-sm text-gray-900 font-semibold">{formatCurrency(viewPurchase.due)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Payment Status</p>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPaymentBadge(viewPurchase.paymentStatus)}`}>
+                  {viewPurchase.paymentStatus}
+                </span>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase">Status</p>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(viewPurchase.status.toLowerCase())}`}>
+                  {viewPurchase.status}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
     </AppLayout>
   );
 }

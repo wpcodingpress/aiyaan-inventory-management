@@ -1,74 +1,136 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const purchases = [
-  { id: "1", purchaseNumber: "PO-2024-001", supplier: "Premium Leather Goods Co.", supplierId: "s1", date: "2024-06-15", itemCount: 3, total: 165000, paid: 165000, due: 0, paymentStatus: "Paid", status: "Completed" },
-  { id: "2", purchaseNumber: "PO-2024-002", supplier: "BD Leather Exports", supplierId: "s2", date: "2024-07-02", itemCount: 2, total: 98000, paid: 50000, due: 48000, paymentStatus: "Partial", status: "Completed" },
-  { id: "3", purchaseNumber: "PO-2024-003", supplier: "Footwear Manufacturers Ltd.", supplierId: "s3", date: "2024-07-20", itemCount: 4, total: 220000, paid: 0, due: 220000, paymentStatus: "Unpaid", status: "Draft" },
-];
+import { prisma } from "@/lib/prisma";
+import { MOVEMENT_TYPES } from "@/lib/constants";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get("page") || "1");
   const limit = parseInt(searchParams.get("limit") || "10");
   const status = searchParams.get("status");
+  const startDate = searchParams.get("startDate");
+  const endDate = searchParams.get("endDate");
 
-  let results = purchases;
-  if (status) {
-    results = results.filter((p) => p.status === status);
+  const where: Record<string, unknown> = {};
+  if (status) where.status = status;
+  if (startDate || endDate) {
+    where.purchaseDate = {
+      ...(startDate ? { gte: new Date(startDate) } : {}),
+      ...(endDate ? { lte: new Date(endDate) } : {}),
+    };
   }
 
-  const start = (page - 1) * limit;
-  const paginatedItems = results.slice(start, start + limit);
+  const [items, total] = await Promise.all([
+    prisma.purchase.findMany({
+      where,
+      include: {
+        supplier: true,
+        items: { include: { variant: { include: { product: true } } } },
+      },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.purchase.count({ where }),
+  ]);
 
   return NextResponse.json({
-    items: paginatedItems,
-    pagination: {
-      page,
-      limit,
-      total: results.length,
-      totalPages: Math.ceil(results.length / limit),
-    },
+    items,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
   });
 }
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { supplierId, supplier, invoiceNumber, date, items, notes, paidAmount } = body;
+  const { supplierId, invoiceNumber, purchaseDate, notes, items, paidAmount } = body;
 
   if (!supplierId || !items || items.length === 0) {
-    return NextResponse.json({ error: "Supplier and at least one item are required." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Supplier and at least one item are required." },
+      { status: 400 }
+    );
   }
 
+  const organizationId = "default";
+
   const total = items.reduce(
-    (sum: number, item: { unitCost: number; quantity: number; discount: number; tax: number }) =>
-      sum + item.unitCost * item.quantity - item.discount + item.tax,
+    (sum: number, item: { unitCost: number; quantity: number; discount?: number; tax?: number }) =>
+      sum + item.unitCost * item.quantity - (item.discount || 0) + (item.tax || 0),
     0
   );
 
-  const dueAmount = total - (paidAmount || 0);
+  const paid = paidAmount || 0;
+  const dueAmount = total - paid;
 
-  let paymentStatus = "Unpaid";
-  if (dueAmount <= 0) paymentStatus = "Paid";
-  else if (paidAmount > 0) paymentStatus = "Partial";
+  let paymentStatus = "unpaid";
+  if (dueAmount <= 0) paymentStatus = "paid";
+  else if (paid > 0) paymentStatus = "partial";
 
-  const newPurchase = {
-    id: String(purchases.length + 1),
-    purchaseNumber: `PO-2024-${String(purchases.length + 1).padStart(3, "0")}`,
-    supplierId,
-    supplier,
-    invoiceNumber,
-    date: date || new Date().toISOString().split("T")[0],
-    itemCount: items.length,
-    total,
-    paid: paidAmount || 0,
-    due: dueAmount,
-    paymentStatus,
-    status: "Draft",
-    notes,
-    items,
-  };
+  const count = await prisma.purchase.count();
+  const year = new Date().getFullYear();
+  const purchaseNumber = `PUR-${year}-${String(count + 1).padStart(4, "0")}`;
 
-  purchases.push(newPurchase);
+  const purchase = await prisma.$transaction(async (tx) => {
+    const newPurchase = await tx.purchase.create({
+      data: {
+        organizationId,
+        supplierId,
+        purchaseNumber,
+        invoiceNumber: invoiceNumber || null,
+        purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
+        subtotal: total,
+        total,
+        paidAmount: paid,
+        dueAmount,
+        paymentStatus,
+        status: "draft",
+        notes: notes || null,
+      },
+    });
 
-  return NextResponse.json(newPurchase, { status: 201 });
+    for (const item of items) {
+      const itemTotal =
+        item.unitCost * item.quantity - (item.discount || 0) + (item.tax || 0);
+
+      await tx.purchaseItem.create({
+        data: {
+          purchaseId: newPurchase.id,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          unitCost: item.unitCost,
+          discount: item.discount || 0,
+          tax: item.tax || 0,
+          total: itemTotal,
+        },
+      });
+
+      const variant = await tx.productVariant.findUnique({
+        where: { id: item.variantId },
+      });
+
+      const newStock = (variant?.currentStock || 0) + item.quantity;
+
+      await tx.productVariant.update({
+        where: { id: item.variantId },
+        data: { currentStock: newStock },
+      });
+
+      await tx.stockMovement.create({
+        data: {
+          organizationId,
+          variantId: item.variantId,
+          movementType: MOVEMENT_TYPES.PURCHASE,
+          quantity: item.quantity,
+          unitCost: item.unitCost,
+          totalCost: item.unitCost * item.quantity,
+          balanceAfter: newStock,
+          referenceType: "Purchase",
+          referenceId: newPurchase.id,
+        },
+      });
+    }
+
+    return newPurchase;
+  });
+
+  return NextResponse.json(purchase, { status: 201 });
 }

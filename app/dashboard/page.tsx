@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import AppLayout from "@/components/layout/app-layout";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { formatCurrency } from "@/lib/utils";
 
 interface DashboardData {
   totalRevenue: number;
@@ -55,9 +56,6 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchDashboard();
   }, []);
-
-  const formatCurrency = (val: number) =>
-    `₹${val.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
   const kpis = data
     ? [
@@ -198,11 +196,11 @@ export default function DashboardPage() {
                     axisLine={false}
                     tickLine={false}
                     tick={{ fill: "#666", fontSize: 12 }}
-                    tickFormatter={(val: number) => `₹${(val / 1000).toFixed(0)}k`}
+                    tickFormatter={(val: number) => `${formatCurrency(val)}`}
                   />
                   <Tooltip
                     formatter={(value) => [
-                      `₹${Number(value).toLocaleString("en-IN")}`,
+                      formatCurrency(Number(value)),
                       "Revenue",
                     ]}
                     contentStyle={{

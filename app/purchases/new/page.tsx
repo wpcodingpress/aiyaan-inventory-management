@@ -1,11 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AppLayout from "@/components/layout/app-layout";
+import { useRouter } from "next/navigation";
+import { formatCurrency } from "@/lib/utils";
+
+interface Supplier {
+  id: string;
+  name: string;
+}
+
+interface ProductVariant {
+  id: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  size: string | null;
+  color: string | null;
+  material: string | null;
+  purchaseCost: number;
+  currentStock: number;
+}
 
 interface LineItem {
   id: number;
-  productId: string;
+  variantId: string;
   quantity: number;
   unitCost: number;
   discount: number;
@@ -13,29 +32,70 @@ interface LineItem {
   total: number;
 }
 
-const productOptions = [
-  { id: "p1", name: "Classic Oxford Brogue - Tan / 42" },
-  { id: "p2", name: "Suede Chelsea Boot - Navy / 44" },
-  { id: "p3", name: "Leather Loafer - Black / 41" },
-  { id: "p4", name: "Handstitched Monk Strap - Oxblood / 43" },
-  { id: "p5", name: "Minimalist Sneaker - White / 42" },
-];
-
 export default function CreatePurchasePage() {
+  const router = useRouter();
   const [supplier, setSupplier] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [purchaseDate, setPurchaseDate] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split("T")[0]);
   const [notes, setNotes] = useState("");
   const [lineItems, setLineItems] = useState<LineItem[]>([
-    { id: 1, productId: "", quantity: 1, unitCost: 0, discount: 0, tax: 0, total: 0 },
+    { id: 1, variantId: "", quantity: 1, unitCost: 0, discount: 0, tax: 0, total: 0 },
   ]);
   const [paidAmount, setPaidAmount] = useState(0);
+  const [saving, setSaving] = useState(false);
+
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [products, setProducts] = useState<ProductVariant[]>([]);
+
+  useEffect(() => {
+    fetch("/api/suppliers?limit=100")
+      .then((r) => r.json())
+      .then((data) => setSuppliers(data.suppliers || []))
+      .catch(() => {});
+
+    fetch("/api/products?limit=100")
+      .then((r) => r.json())
+      .then((data) => {
+        const variants: ProductVariant[] = [];
+        (data.products || []).forEach((p: any) => {
+          if (p.variants) {
+            p.variants.forEach((v: any) => {
+              variants.push({
+                id: v.id,
+                productId: p.id,
+                productName: p.name,
+                sku: v.sku || p.sku,
+                size: v.size,
+                color: v.color,
+                material: v.material,
+                purchaseCost: Number(v.purchaseCost) || 0,
+                currentStock: v.currentStock || 0,
+              });
+            });
+          }
+        });
+        setProducts(variants);
+      })
+      .catch(() => {});
+  }, []);
+
+  const variantLabel = (v: ProductVariant) => {
+    const parts = [v.productName];
+    if (v.color) parts.push(v.color);
+    if (v.size) parts.push(v.size);
+    if (v.material) parts.push(v.material);
+    return `${parts.join(" - ")} (${v.sku})`;
+  };
 
   const updateLineItem = (id: number, field: keyof LineItem, value: number | string) => {
     setLineItems((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
         const updated = { ...item, [field]: value };
+        if (field === "variantId") {
+          const prod = products.find((p) => p.id === value);
+          if (prod) updated.unitCost = prod.purchaseCost;
+        }
         updated.total = updated.quantity * updated.unitCost - updated.discount + updated.tax;
         return updated;
       })
@@ -45,7 +105,7 @@ export default function CreatePurchasePage() {
   const addLineItem = () => {
     setLineItems((prev) => [
       ...prev,
-      { id: Date.now(), productId: "", quantity: 1, unitCost: 0, discount: 0, tax: 0, total: 0 },
+      { id: Date.now(), variantId: "", quantity: 1, unitCost: 0, discount: 0, tax: 0, total: 0 },
     ]);
   };
 
@@ -59,6 +119,41 @@ export default function CreatePurchasePage() {
   const totalTax = lineItems.reduce((sum, item) => sum + item.tax, 0);
   const grandTotal = subtotal - totalDiscount + totalTax;
   const dueAmount = grandTotal - paidAmount;
+
+  const handleSubmit = async (status: "draft" | "completed") => {
+    if (!supplier || lineItems.every((i) => !i.variantId)) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/purchases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          supplierId: supplier,
+          invoiceNumber,
+          purchaseDate,
+          notes,
+          paidAmount,
+          status,
+          items: lineItems
+            .filter((i) => i.variantId)
+            .map((i) => ({
+              variantId: i.variantId,
+              quantity: i.quantity,
+              unitCost: i.unitCost,
+              discount: i.discount,
+              tax: i.tax,
+            })),
+        }),
+      });
+      if (res.ok) {
+        router.push("/purchases");
+      }
+    } catch (err) {
+      console.error("Failed to create purchase:", err);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <AppLayout title="Create Purchase">
@@ -74,9 +169,9 @@ export default function CreatePurchasePage() {
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               >
                 <option value="">Select supplier...</option>
-                <option value="s1">Premium Leather Goods Co.</option>
-                <option value="s2">BD Leather Exports</option>
-                <option value="s3">Footwear Manufacturers Ltd.</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -141,13 +236,13 @@ export default function CreatePurchasePage() {
                   <tr key={item.id}>
                     <td className="py-3 pr-4">
                       <select
-                        value={item.productId}
-                        onChange={(e) => updateLineItem(item.id, "productId", e.target.value)}
+                        value={item.variantId}
+                        onChange={(e) => updateLineItem(item.id, "variantId", e.target.value)}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                       >
                         <option value="">Select product...</option>
-                        {productOptions.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
+                        {products.map((p) => (
+                          <option key={p.id} value={p.id}>{variantLabel(p)}</option>
                         ))}
                       </select>
                     </td>
@@ -191,7 +286,7 @@ export default function CreatePurchasePage() {
                       />
                     </td>
                     <td className="py-3 pr-4 text-sm text-right font-medium text-gray-900">
-                      ৳{item.total.toLocaleString()}
+                      {formatCurrency(item.total)}
                     </td>
                     <td className="py-3">
                       <button
@@ -214,19 +309,19 @@ export default function CreatePurchasePage() {
           <div className="space-y-3 max-w-xs ml-auto">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Subtotal</span>
-              <span className="font-medium text-gray-900">৳{subtotal.toLocaleString()}</span>
+              <span className="font-medium text-gray-900">{formatCurrency(subtotal)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Discount</span>
-              <span className="font-medium text-rose-600">-৳{totalDiscount.toLocaleString()}</span>
+              <span className="font-medium text-rose-600">-{formatCurrency(totalDiscount)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Tax</span>
-              <span className="font-medium text-gray-900">৳{totalTax.toLocaleString()}</span>
+              <span className="font-medium text-gray-900">{formatCurrency(totalTax)}</span>
             </div>
             <div className="border-t border-gray-200 pt-3 flex justify-between">
               <span className="text-sm font-semibold text-gray-900">Total</span>
-              <span className="text-lg font-bold text-gray-900">৳{grandTotal.toLocaleString()}</span>
+              <span className="text-lg font-bold text-gray-900">{formatCurrency(grandTotal)}</span>
             </div>
           </div>
         </div>
@@ -248,7 +343,7 @@ export default function CreatePurchasePage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Due Amount</label>
               <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-900">
-                ৳{dueAmount.toLocaleString()}
+                {formatCurrency(dueAmount)}
               </div>
             </div>
             <div>
@@ -271,11 +366,19 @@ export default function CreatePurchasePage() {
         </div>
 
         <div className="flex justify-end gap-3">
-          <button className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium">
-            Save as Draft
+          <button
+            onClick={() => handleSubmit("draft")}
+            disabled={saving}
+            className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium disabled:opacity-50"
+          >
+            {saving ? "Saving..." : "Save as Draft"}
           </button>
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium">
-            Save & Complete
+          <button
+            onClick={() => handleSubmit("completed")}
+            disabled={saving}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50"
+          >
+            {saving ? "Saving..." : "Save & Complete"}
           </button>
         </div>
       </div>

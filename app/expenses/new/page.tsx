@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import AppLayout from "@/components/layout/app-layout";
+import { useRouter } from "next/navigation";
 
 const categories = ["Rent", "Utilities", "Marketing", "Salaries", "Transportation", "Office Supplies", "Other"];
 const paymentMethods = ["Cash", "Credit Card", "Bank Transfer", "Cheque"];
 
 export default function AddExpensePage() {
+  const router = useRouter();
   const [form, setForm] = useState({
     category: "",
     title: "",
@@ -38,7 +40,7 @@ export default function AddExpensePage() {
       if (res.ok) {
         setSuccess(true);
         setTimeout(() => {
-          window.location.href = "/expenses";
+          router.push("/expenses");
         }, 1500);
       }
     } catch (err) {

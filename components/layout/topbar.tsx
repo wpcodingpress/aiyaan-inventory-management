@@ -1,16 +1,44 @@
 "use client";
 
+import { useState, useEffect } from "react";
+
 interface TopBarProps {
   title: string;
 }
 
 export default function TopBar({ title }: TopBarProps) {
+  const [org, setOrg] = useState<{ logo?: string; businessName?: string }>({});
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        const o = data.organization;
+        if (o) {
+          setOrg({
+            logo: o.logo || "",
+            businessName: o.name || "",
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <header className="fixed top-0 left-[260px] right-0 h-16 bg-surface border-b border-outline-variant z-40 flex items-center px-6 gap-4">
       {/* Page Title */}
-      <h2 className="font-display-md text-lg font-semibold text-on-surface shrink-0">
-        {title}
-      </h2>
+      <div className="flex items-center gap-3 shrink-0">
+        {org.logo ? (
+          <div className="w-7 h-7 rounded-lg bg-white border border-outline-variant flex items-center justify-center overflow-hidden">
+            <img src={org.logo} alt="Logo" className="w-full h-full object-contain" />
+          </div>
+        ) : (
+          <span className="material-symbols-outlined text-[22px] text-on-surface-variant">package_2</span>
+        )}
+        <h2 className="font-display-md text-lg font-semibold text-on-surface shrink-0">
+          {org.businessName || title}
+        </h2>
+      </div>
 
       {/* Search */}
       <div className="flex-1 max-w-xl mx-auto">

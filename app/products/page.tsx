@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import AppLayout from "@/components/layout/app-layout";
+import { formatCurrency, getStatusColor } from "@/lib/utils";
+import Link from "next/link";
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<any[]>([]);
@@ -49,19 +51,6 @@ export default function ProductsPage() {
   }, [page, category, brand, stockStatus]);
 
   const displayProducts = products.length > 0 ? products : sampleProducts;
-
-  const getStatusStyle = (status: string) => {
-    switch (status) {
-      case "In Stock":
-        return "bg-emerald-50 text-emerald-700 border border-emerald-200";
-      case "Low Stock":
-        return "bg-amber-50 text-amber-700 border border-amber-200";
-      case "Out of Stock":
-        return "bg-rose-50 text-rose-700 border border-rose-200";
-      default:
-        return "bg-gray-50 text-gray-700 border border-gray-200";
-    }
-  };
 
   return (
     <AppLayout title="Product Management">
@@ -112,10 +101,10 @@ export default function ProductsPage() {
               <option value="outOfStock">Out of Stock</option>
             </select>
           </div>
-          <button className="flex items-center gap-2 px-4 py-2 bg-[var(--primary,#6750a4)] text-white rounded-lg hover:bg-[var(--primary,#6750a4)]/90 transition-colors font-medium">
+          <Link href="/products/new" className="flex items-center gap-2 px-4 py-2 bg-[var(--primary,#6750a4)] text-white rounded-lg hover:bg-[var(--primary,#6750a4)]/90 transition-colors font-medium">
             <span className="material-symbols-outlined text-lg">add</span>
             Add Product
-          </button>
+          </Link>
         </div>
 
         <div className="bg-white rounded-xl border border-[var(--outline-variant,#e0e0e0)] overflow-hidden">
@@ -154,11 +143,11 @@ export default function ProductsPage() {
                   <td className="px-4 py-3 text-sm text-[var(--on-surface-variant,#666)] font-mono">{product.sku}</td>
                   <td className="px-4 py-3 text-sm text-[var(--on-surface-variant,#666)]">{product.category}</td>
                   <td className="px-4 py-3 text-sm text-[var(--on-surface-variant,#666)]">{typeof product.variantCount === "number" ? `${product.variantCount} variants` : product.variantCount}</td>
-                  <td className="px-4 py-3 text-sm text-[var(--on-surface-variant,#666)] text-right">₹{Number(product.cost).toLocaleString()}</td>
-                  <td className="px-4 py-3 text-sm text-[var(--on-surface,#1a1a1a)] font-medium text-right">₹{Number(product.price).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-[var(--on-surface-variant,#666)] text-right">{formatCurrency(Number(product.cost))}</td>
+                  <td className="px-4 py-3 text-sm text-[var(--on-surface,#1a1a1a)] font-medium text-right">{formatCurrency(Number(product.price))}</td>
                   <td className="px-4 py-3 text-sm text-[var(--on-surface,#1a1a1a)] font-medium text-right">{product.stock}</td>
                   <td className="px-4 py-3 text-center">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusStyle(product.status)}`}>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(product.status)}`}>
                       {product.status}
                     </span>
                   </td>

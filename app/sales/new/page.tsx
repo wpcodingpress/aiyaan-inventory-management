@@ -1,7 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AppLayout from "@/components/layout/app-layout";
+import { useRouter } from "next/navigation";
+import { formatCurrency } from "@/lib/utils";
+
+interface Customer {
+  id: string;
+  name: string;
+  customerType: string;
+}
+
+interface ProductVariant {
+  id: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  size: string | null;
+  color: string | null;
+  material: string | null;
+  purchaseCost: number;
+  sellingPrice: number;
+  currentStock: number;
+}
 
 interface LineItem {
   id: number;
@@ -17,23 +38,8 @@ interface LineItem {
   currentStock: number;
 }
 
-const productOptions = [
-  { id: "p1", name: "Premium Leather Loafer", sku: "PLL-001", cost: 2200, price: 4900, stock: 120 },
-  { id: "p2", name: "Urban Casual Sneaker", sku: "UCS-002", cost: 1800, price: 3200, stock: 85 },
-  { id: "p3", name: "Classic Formal Shoe", sku: "CFS-003", cost: 2000, price: 2850, stock: 200 },
-  { id: "p4", name: "Sport Running Shoe", sku: "SRS-004", cost: 1500, price: 2600, stock: 45 },
-  { id: "p5", name: "Suede Chelsea Boot", sku: "SCB-005", cost: 2500, price: 4500, stock: 60 },
-];
-
-const customerOptions = [
-  { id: "c1", name: "Bata Retailers Ltd.", type: "Wholesale Partner" },
-  { id: "c2", name: "Apex Footwear", type: "Distributor" },
-  { id: "c3", name: "Lotto Outlets", type: "Retail Chain" },
-  { id: "c4", name: "Walkers & Co.", type: "Retail" },
-  { id: "c5", name: "Shoe Gallery", type: "Boutique" },
-];
-
 export default function CreateSalePage() {
+  const router = useRouter();
   const [customerId, setCustomerId] = useState("");
   const [saleDate, setSaleDate] = useState(new Date().toISOString().split("T")[0]);
   const [notes, setNotes] = useState("");
@@ -42,6 +48,74 @@ export default function CreateSalePage() {
   ]);
   const [paidAmount, setPaidAmount] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [products, setProducts] = useState<ProductVariant[]>([]);
+
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({ name: "", email: "", phone: "" });
+
+  useEffect(() => {
+    fetch("/api/customers?limit=100")
+      .then((r) => r.json())
+      .then((data) => setCustomers(data.items || []))
+      .catch(() => {});
+
+    fetch("/api/products?limit=100")
+      .then((r) => r.json())
+      .then((data) => {
+        const variants: ProductVariant[] = [];
+        (data.products || []).forEach((p: any) => {
+          if (p.variants) {
+            p.variants.forEach((v: any) => {
+              variants.push({
+                id: v.id,
+                productId: p.id,
+                productName: p.name,
+                sku: v.sku || p.sku,
+                size: v.size,
+                color: v.color,
+                material: v.material,
+                purchaseCost: Number(v.purchaseCost) || 0,
+                sellingPrice: Number(v.sellingPrice) || 0,
+                currentStock: v.currentStock || 0,
+              });
+            });
+          }
+        });
+        setProducts(variants);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleAddCustomer = async () => {
+    if (!newCustomer.name) return;
+    try {
+      const res = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newCustomer),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setCustomers((prev) => [...prev, { id: created.id, name: created.name, customerType: created.customerType || "individual" }]);
+        setCustomerId(created.id);
+        setNewCustomer({ name: "", email: "", phone: "" });
+        setShowAddCustomer(false);
+      }
+    } catch (err) {
+      console.error("Failed to create customer:", err);
+    }
+  };
+
+  const variantLabel = (v: ProductVariant) => {
+    const parts = [v.productName];
+    if (v.color) parts.push(v.color);
+    if (v.size) parts.push(v.size);
+    if (v.material) parts.push(v.material);
+    return `${parts.join(" - ")} (${v.sku})`;
+  };
 
   const updateLineItem = (id: number, field: keyof LineItem, value: number | string) => {
     setLineItems((prev) =>
@@ -55,20 +129,21 @@ export default function CreateSalePage() {
     );
   };
 
-  const selectProduct = (id: number, productId: string) => {
-    const product = productOptions.find((p) => p.id === productId);
-    if (!product) return;
+  const selectProduct = (id: number, variantId: string) => {
+    const variant = products.find((v) => v.id === variantId);
+    if (!variant) return;
     setLineItems((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
         return {
           ...item,
-          productId,
-          sellingPrice: product.price,
-          cost: product.cost,
-          currentStock: product.stock,
-          total: item.quantity * product.price - item.discount + item.tax,
-          profit: (product.price - product.cost) * item.quantity,
+          productId: variant.productId,
+          variantId: variant.id,
+          sellingPrice: variant.sellingPrice,
+          cost: variant.purchaseCost,
+          currentStock: variant.currentStock,
+          total: item.quantity * variant.sellingPrice - item.discount + item.tax,
+          profit: (variant.sellingPrice - variant.purchaseCost) * item.quantity,
         };
       })
     );
@@ -86,9 +161,9 @@ export default function CreateSalePage() {
     setLineItems((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const filteredProducts = productOptions.filter(
+  const filteredProducts = products.filter(
     (p) =>
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.productName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.sku.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -101,8 +176,41 @@ export default function CreateSalePage() {
 
   const paymentStatus = dueAmount <= 0 ? "Paid" : paidAmount > 0 ? "Partial" : "Unpaid";
   const hasInsufficientStock = lineItems.some(
-    (item) => item.productId && item.quantity > item.currentStock
+    (item) => item.variantId && item.quantity > item.currentStock
   );
+
+  const handleSubmit = async (status: "draft" | "completed") => {
+    if (lineItems.every((i) => !i.variantId)) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/sales", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: customerId || null,
+          paidAmount,
+          notes,
+          status,
+          items: lineItems
+            .filter((i) => i.variantId)
+            .map((i) => ({
+              variantId: i.variantId,
+              quantity: i.quantity,
+              sellingPrice: i.sellingPrice,
+              discount: i.discount,
+              tax: i.tax,
+            })),
+        }),
+      });
+      if (res.ok) {
+        router.push("/sales");
+      }
+    } catch (err) {
+      console.error("Failed to create sale:", err);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <AppLayout title="New Sale">
@@ -119,14 +227,51 @@ export default function CreateSalePage() {
                   className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#4f46e5] focus:border-[#4f46e5] outline-none"
                 >
                   <option value="">Select customer...</option>
-                  {customerOptions.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.type})</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.customerType})</option>
                   ))}
                 </select>
-                <button className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-[#4f46e5] hover:bg-gray-50 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCustomer(!showAddCustomer)}
+                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-[#4f46e5] hover:bg-gray-50 transition-colors"
+                >
                   <span className="material-symbols-outlined text-[18px]">person_add</span>
                 </button>
               </div>
+              {showAddCustomer && (
+                <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-lg space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Customer name *"
+                    value={newCustomer.name}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#4f46e5] focus:border-[#4f46e5] outline-none"
+                  />
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    value={newCustomer.email}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#4f46e5] focus:border-[#4f46e5] outline-none"
+                  />
+                  <input
+                    type="tel"
+                    placeholder="Phone"
+                    value={newCustomer.phone}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#4f46e5] focus:border-[#4f46e5] outline-none"
+                  />
+                  <div className="flex gap-2">
+                    <button type="button" onClick={handleAddCustomer} className="px-3 py-1.5 bg-[#4f46e5] text-white rounded-lg text-xs font-medium hover:bg-[#4338ca] transition-colors">
+                      Add Customer
+                    </button>
+                    <button type="button" onClick={() => setShowAddCustomer(false)} className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Sale Date *</label>
@@ -201,18 +346,18 @@ export default function CreateSalePage() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {lineItems.map((item) => {
-                  const insufficient = item.productId && item.quantity > item.currentStock;
+                  const insufficient = item.variantId && item.quantity > item.currentStock;
                   return (
                     <tr key={item.id} className={insufficient ? "bg-rose-50" : ""}>
                       <td className="py-3 pr-4">
                         <select
-                          value={item.productId}
+                          value={item.variantId}
                           onChange={(e) => selectProduct(item.id, e.target.value)}
                           className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#4f46e5] focus:border-[#4f46e5] outline-none"
                         >
                           <option value="">Select product...</option>
                           {filteredProducts.map((p) => (
-                            <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
+                            <option key={p.id} value={p.id}>{variantLabel(p)}</option>
                           ))}
                         </select>
                         {insufficient && (
@@ -224,7 +369,7 @@ export default function CreateSalePage() {
                       </td>
                       <td className="py-3 pr-4 text-center">
                         <span className={`text-sm font-medium ${insufficient ? "text-rose-600" : item.currentStock <= 10 ? "text-amber-600" : "text-gray-900"}`}>
-                          {item.currentStock || "—"}
+                          {item.variantId ? item.currentStock : "—"}
                         </span>
                       </td>
                       <td className="py-3 pr-4">
@@ -248,7 +393,7 @@ export default function CreateSalePage() {
                       </td>
                       <td className="py-3 pr-4">
                         <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-right text-gray-600">
-                          ৳{item.cost.toLocaleString()}
+                          {formatCurrency(item.cost)}
                         </div>
                       </td>
                       <td className="py-3 pr-4">
@@ -272,10 +417,10 @@ export default function CreateSalePage() {
                         />
                       </td>
                       <td className="py-3 pr-4 text-sm text-right font-medium text-gray-900">
-                        ৳{item.total.toLocaleString()}
+                        {formatCurrency(item.total)}
                       </td>
                       <td className="py-3 pr-4 text-sm text-right font-medium text-emerald-600">
-                        {item.productId ? `৳${item.profit.toLocaleString()}` : "—"}
+                        {item.variantId ? formatCurrency(item.profit) : "—"}
                       </td>
                       <td className="py-3">
                         <button
@@ -312,7 +457,7 @@ export default function CreateSalePage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Due Amount</label>
                 <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-900">
-                  ৳{Math.max(0, dueAmount).toLocaleString()}
+                  {formatCurrency(Math.max(0, dueAmount))}
                 </div>
               </div>
               <div>
@@ -339,38 +484,43 @@ export default function CreateSalePage() {
             <div className="space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Subtotal</span>
-                <span className="font-medium text-gray-900">৳{subtotal.toLocaleString()}</span>
+                <span className="font-medium text-gray-900">{formatCurrency(subtotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Discount</span>
-                <span className="font-medium text-rose-600">-৳{totalDiscount.toLocaleString()}</span>
+                <span className="font-medium text-rose-600">-{formatCurrency(totalDiscount)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Tax</span>
-                <span className="font-medium text-gray-900">৳{totalTax.toLocaleString()}</span>
+                <span className="font-medium text-gray-900">{formatCurrency(totalTax)}</span>
               </div>
               <div className="border-t border-gray-200 pt-3 flex justify-between">
                 <span className="text-sm font-semibold text-gray-900">Total</span>
-                <span className="text-lg font-bold text-gray-900">৳{grandTotal.toLocaleString()}</span>
+                <span className="text-lg font-bold text-gray-900">{formatCurrency(grandTotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Profit</span>
-                <span className="font-medium text-emerald-600">৳{totalProfit.toLocaleString()}</span>
+                <span className="font-medium text-emerald-600">{formatCurrency(totalProfit)}</span>
               </div>
             </div>
           </div>
         </div>
 
         <div className="flex justify-end gap-3">
-          <button className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium">
-            Save as Draft
+          <button
+            onClick={() => handleSubmit("draft")}
+            disabled={saving}
+            className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium disabled:opacity-50"
+          >
+            {saving ? "Saving..." : "Save as Draft"}
           </button>
           <button
-            disabled={hasInsufficientStock}
+            onClick={() => handleSubmit("completed")}
+            disabled={hasInsufficientStock || saving}
             className="px-4 py-2 bg-[#4f46e5] text-white rounded-lg hover:bg-[#4338ca] transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <span className="material-symbols-outlined text-[16px] mr-1 align-text-bottom">check_circle</span>
-            Complete Sale
+            {saving ? "Saving..." : "Complete Sale"}
           </button>
         </div>
       </div>

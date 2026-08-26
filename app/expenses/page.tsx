@@ -1,14 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import AppLayout from "@/components/layout/app-layout";
+import ActionMenu from "@/components/ui/action-menu";
+import Pagination from "@/components/ui/pagination";
+import Modal from "@/components/ui/modal";
+import { formatCurrency } from "@/lib/utils";
 
-const sampleExpenses = [
-  { id: "1", date: "2024-07-01", category: "Rent", title: "Office & Warehouse Rent", amount: 45000, paymentMethod: "Bank Transfer", reference: "INV-2024-071", status: "Paid" },
-  { id: "2", date: "2024-07-05", category: "Utilities", title: "Electricity & Internet", amount: 12000, paymentMethod: "Cash", reference: "UTL-2024-005", status: "Paid" },
-  { id: "3", date: "2024-07-15", category: "Marketing", title: "Digital Marketing Campaign", amount: 25000, paymentMethod: "Credit Card", reference: "MKT-2024-012", status: "Paid" },
-  { id: "4", date: "2024-07-20", category: "Salaries", title: "Staff Salaries - July", amount: 85000, paymentMethod: "Bank Transfer", reference: "SAL-2024-07", status: "Paid" },
-];
+interface Expense {
+  id: string;
+  date: string;
+  category: string;
+  title: string;
+  amount: number;
+  paymentMethod: string;
+  reference: string;
+  status: string;
+}
 
 const categoryColors: Record<string, string> = {
   Rent: "bg-blue-50 text-blue-700 border border-blue-200",
@@ -24,13 +32,44 @@ const categories = ["All", "Rent", "Utilities", "Marketing", "Salaries", "Transp
 
 export default function ExpensesPage() {
   const [activeCategory, setActiveCategory] = useState("All");
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalAmount, setTotalAmount] = useState(0);
 
-  const filtered =
-    activeCategory === "All"
-      ? sampleExpenses
-      : sampleExpenses.filter((e) => e.category === activeCategory);
+  const [editExpense, setEditExpense] = useState<Expense | null>(null);
+  const limit = 10;
 
-  const totalAmount = filtered.reduce((sum, e) => sum + e.amount, 0);
+  const fetchExpenses = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (activeCategory !== "All") params.set("category", activeCategory);
+      const res = await fetch(`/api/expenses?${params}`);
+      const data = await res.json();
+      setExpenses(data.expenses ?? data.data ?? []);
+      setTotalPages(data.totalPages ?? Math.ceil((data.total ?? 0) / limit));
+      setTotal(data.total ?? 0);
+      setTotalAmount(data.totalAmount ?? data.summary?.total ?? 0);
+    } catch {
+      setExpenses([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, activeCategory, limit]);
+
+  useEffect(() => { fetchExpenses(); }, [fetchExpenses]);
+  useEffect(() => { setPage(1); }, [activeCategory]);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this expense?")) return;
+    try {
+      await fetch(`/api/expenses/${id}`, { method: "DELETE" });
+      fetchExpenses();
+    } catch { /* empty */ }
+  };
 
   return (
     <AppLayout title="Expenses">
@@ -39,7 +78,7 @@ export default function ExpensesPage() {
           <div>
             <p className="text-sm text-gray-500">Track and manage business expenses.</p>
             <p className="text-lg font-semibold text-gray-900 mt-1">
-              Total: ৳{totalAmount.toLocaleString()}
+              Total: {formatCurrency(totalAmount)}
             </p>
           </div>
           <a
@@ -84,14 +123,21 @@ export default function ExpensesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.length === 0 ? (
+                {loading ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-gray-400">
-                      No expenses found.
+                    <td colSpan={7} className="text-center py-12">
+                      <div className="flex items-center justify-center gap-2 text-gray-400">
+                        <span className="material-symbols-outlined text-[20px] animate-spin">progress_activity</span>
+                        Loading expenses...
+                      </div>
                     </td>
                   </tr>
+                ) : expenses.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="text-center py-12 text-gray-400">No expenses found.</td>
+                  </tr>
                 ) : (
-                  filtered.map((expense) => (
+                  expenses.map((expense) => (
                     <tr key={expense.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="px-6 py-4 text-sm text-gray-600">{expense.date}</td>
                       <td className="px-6 py-4">
@@ -100,13 +146,17 @@ export default function ExpensesPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm font-medium text-gray-900">{expense.title}</td>
-                      <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">৳{expense.amount.toLocaleString()}</td>
+                      <td className="px-6 py-4 text-sm text-gray-900 text-right font-medium">{formatCurrency(expense.amount)}</td>
                       <td className="px-6 py-4 text-sm text-gray-600">{expense.paymentMethod}</td>
                       <td className="px-6 py-4 text-sm text-gray-500 font-mono">{expense.reference}</td>
                       <td className="px-6 py-4 text-center">
-                        <button className="text-gray-400 hover:text-gray-600 transition-colors">
-                          <span className="material-symbols-outlined text-[18px]">more_horiz</span>
-                        </button>
+                        <ActionMenu
+                          items={[
+                            { label: "Edit", icon: "edit", onClick: () => { window.location.href = `/expenses/new?id=${expense.id}`; } },
+                            { label: "Duplicate", icon: "content_copy", onClick: () => { window.location.href = `/expenses/new?duplicate=${expense.id}`; } },
+                            { label: "Delete", icon: "delete", onClick: () => handleDelete(expense.id), variant: "danger" },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))
@@ -115,16 +165,14 @@ export default function ExpensesPage() {
             </table>
           </div>
 
-          <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100">
-            <p className="text-sm text-gray-500">
-              Showing {filtered.length} of {filtered.length} expenses
-            </p>
-            <div className="flex gap-1">
-              <button className="px-3 py-1 text-sm text-gray-400 cursor-not-allowed" disabled>Previous</button>
-              <button className="px-3 py-1 text-sm bg-blue-600 text-white rounded">1</button>
-              <button className="px-3 py-1 text-sm text-gray-400 cursor-not-allowed" disabled>Next</button>
-            </div>
-          </div>
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            total={total}
+            showingCount={expenses.length}
+            itemName="expenses"
+          />
         </div>
       </div>
     </AppLayout>

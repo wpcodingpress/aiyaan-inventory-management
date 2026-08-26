@@ -24,6 +24,13 @@ model Organization {
   contactPhone    String?
   address         String?
   isActive        Boolean   @default(true)
+  r2Provider      String    @default("Cloudflare R2")
+  r2AccountId     String?
+  r2AccessKeyId   String?
+  r2SecretAccessKey String?
+  r2BucketName    String?
+  r2PublicUrl     String?
+  r2Connected     Boolean   @default(false)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

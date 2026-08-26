@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState, useEffect } from "react";
 
 const navItems = [
   { label: "Dashboard", icon: "dashboard", href: "/dashboard" },
@@ -19,21 +20,44 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const [org, setOrg] = useState<{ logo?: string; businessName?: string; businessType?: string }>({});
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        const o = data.organization;
+        if (o) {
+          setOrg({
+            logo: o.logo || "",
+            businessName: o.name || "",
+            businessType: o.businessType || "",
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-[260px] bg-inverse-surface flex flex-col z-50">
       {/* Logo Area */}
       <div className="px-6 py-6 border-b border-white/10">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary-container flex items-center justify-center">
-            <span className="material-symbols-outlined text-white text-xl">package_2</span>
-          </div>
+          {org.logo ? (
+            <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center overflow-hidden">
+              <img src={org.logo} alt="Logo" className="w-full h-full object-contain" />
+            </div>
+          ) : (
+            <div className="w-10 h-10 rounded-xl bg-primary-container flex items-center justify-center">
+              <span className="material-symbols-outlined text-white text-xl">package_2</span>
+            </div>
+          )}
           <div>
             <h1 className="text-white font-display-lg text-sm font-bold tracking-wide">
-              INVENTORY PLATFORM
+              {(org.businessName || "INVENTORY PLATFORM").toUpperCase()}
             </h1>
             <p className="text-white/50 text-xs font-body-sm">
-              Footwear ERP
+              {org.businessType || "Inventory Platform"}
             </p>
           </div>
         </div>
