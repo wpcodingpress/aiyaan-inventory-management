@@ -192,6 +192,7 @@ export default function SettingsPage() {
     if (!file) return;
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("folder", "branding");
     try {
       const res = await fetch("/api/upload", { method: "POST", body: formData });
       if (res.ok) {
@@ -199,10 +200,11 @@ export default function SettingsPage() {
         setGeneral((prev) => ({ ...prev, [field]: data.url }));
         showMessage("success", `${field === "logo" ? "Logo" : "Favicon"} uploaded successfully!`);
       } else {
-        showMessage("error", "Upload failed.");
+        const data = await res.json().catch(() => ({}));
+        showMessage("error", data.error || "Upload failed. Check Cloud Storage settings.");
       }
     } catch {
-      showMessage("error", "Upload failed.");
+      showMessage("error", "Upload failed. Check Cloud Storage settings.");
     }
   };
 

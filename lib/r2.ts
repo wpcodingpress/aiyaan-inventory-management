@@ -1,4 +1,5 @@
-import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { S3Client, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export interface R2Config {
   accountId: string;
@@ -17,6 +18,30 @@ export function getR2Client(config: R2Config): S3Client {
       secretAccessKey: config.secretAccessKey,
     },
   });
+}
+
+export async function uploadToR2(
+  config: R2Config,
+  key: string,
+  body: Buffer,
+  contentType: string
+): Promise<{ url: string; key: string }> {
+  const client = getR2Client(config);
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: config.bucketName,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    })
+  );
+
+  const publicUrl = config.publicUrl
+    ? `${config.publicUrl.replace(/\/+$/, "")}/${key}`
+    : `https://${config.bucketName}.${config.accountId}.r2.dev/${key}`;
+
+  return { url: publicUrl, key };
 }
 
 export async function testR2Connection(config: R2Config): Promise<{ success: boolean; message: string }> {
