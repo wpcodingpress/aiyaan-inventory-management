@@ -163,13 +163,19 @@ export function streamWithFallback(
 
     const startedAt = Date.now()
 
-    for (const id of candidates) {
+    for (let index = 0; index < candidates.length; index++) {
+      const id = candidates[index]
       const provider = createProvider(id, config)
+      // Split the budget evenly across providers. A provider that is up but slow
+      // must not spend the whole allowance and starve the next one: a fully
+      // 503-ing Gemini used all 60s, so a healthy Groq was never even tried.
+      const providerDeadline =
+        startedAt + ((index + 1) * PROVIDER_BUDGET_MS) / candidates.length
 
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-        // Cap each attempt by whatever budget is left, so stacked stalls stop
-        // at PROVIDER_BUDGET_MS rather than MAX_ATTEMPTS * PROVIDER_IDLE_MS.
-        const remaining = PROVIDER_BUDGET_MS - (Date.now() - startedAt)
+        // Cap each attempt by whatever this provider has left, so stacked stalls
+        // stop at the budget rather than MAX_ATTEMPTS * PROVIDER_IDLE_MS.
+        const remaining = Math.floor(providerDeadline - Date.now())
         if (remaining <= 0) break
         let emitted = false
         const guard = guardAttempt(opts.signal, Math.min(PROVIDER_IDLE_MS, remaining))
