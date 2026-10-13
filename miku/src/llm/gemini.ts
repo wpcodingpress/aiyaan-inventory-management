@@ -51,6 +51,34 @@ export function getGeminiModel(config?: ResolvedMikuConfig): string {
   return process.env.GEMINI_MODEL || "gemini-3.5-flash-lite"
 }
 
+/**
+ * Equivalents tried, in order, when the configured model is unavailable.
+ *
+ * Free-tier load is uneven — on any given day the lite model answers and the
+ * full one times out, or exactly the reverse. Pinning one name means a demand
+ * spike takes chat down entirely, so we walk a short list before giving up.
+ * The names are deliberately generic because Google both retires and re-ships
+ * them constantly; a name that 404s today is simply skipped.
+ */
+const GEMINI_FALLBACK_MODELS = [
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
+]
+
+/** The configured model first, then equivalents, with no duplicates. */
+function geminiModelCandidates(config?: ResolvedMikuConfig): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const model of [getGeminiModel(config), ...GEMINI_FALLBACK_MODELS]) {
+    if (!seen.has(model)) {
+      seen.add(model)
+      out.push(model)
+    }
+  }
+  return out
+}
+
 export function isGeminiConfigured(): boolean {
   return Boolean(apiKey())
 }
@@ -106,7 +134,6 @@ export async function* streamGemini(
     return
   }
 
-  const model = getGeminiModel(config)
   const body: Record<string, unknown> = {
     systemInstruction: { parts: [{ text: opts.system }] },
     contents: toContents(opts.messages, []),
@@ -128,37 +155,61 @@ export async function* streamGemini(
     body.toolConfig = { functionCallingConfig: { mode: "AUTO" } }
   }
 
-  const url = `${BASE}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`
+  // Walk the model list only until the first one answers. Switching is only
+  // ever safe before the first byte, so a partially-streamed answer is never
+  // truncated — we simply never reach this loop again once streaming begins.
+  let res: Response | null = null
+  let lastError: ProviderError | null = null
 
-  let res: Response
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: opts.signal,
-    })
-  } catch (err) {
-    yield {
-      type: "error",
-      message: err instanceof Error ? err.message : "Gemini request failed",
-      retryable: true,
+  for (const model of geminiModelCandidates(config)) {
+    const url = `${BASE}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`
+
+    let attempt: Response
+    try {
+      attempt = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: opts.signal,
+      })
+    } catch (err) {
+      lastError = new ProviderError(
+        err instanceof Error ? err.message : "Gemini request failed",
+        true
+      )
+      continue
     }
+
+    if (!attempt.ok || !attempt.body) {
+      const text = await attempt.text().catch(() => "")
+      // 404 = retired model, 429/5xx = load: both are worth another model.
+      // Anything else (400, 401, 403) is a real configuration problem — surface
+      // it rather than masking it behind a model that happens to answer.
+      const retryable =
+        attempt.status === 404 || attempt.status === 429 || attempt.status >= 500
+      lastError = new ProviderError(
+        `Gemini ${attempt.status}: ${text.slice(0, 300)}`,
+        retryable
+      )
+      if (!retryable) throw lastError
+      continue
+    }
+
+    res = attempt
+    break
+  }
+
+  if (!res || !res.body) {
+    if (lastError) throw lastError
+    yield { type: "error", message: "Gemini request failed", retryable: true }
     return
   }
-
-  if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => "")
-    throw new ProviderError(
-      `Gemini ${res.status}: ${text.slice(0, 300)}`,
-      res.status === 429 || res.status >= 500
-    )
-  }
+  const stream = res.body
 
   const usage: { in?: number; out?: number } = {}
   let callSeq = 0
 
-  for await (const frame of sseFrames(res.body, opts.signal)) {
+  for await (const frame of sseFrames(stream, opts.signal)) {
     const payload = frameData(frame)
     if (payload === null) continue
     const parsed = safeJsonParse<GeminiFrame | null>(payload, null)
