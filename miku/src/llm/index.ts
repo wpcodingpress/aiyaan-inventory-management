@@ -120,6 +120,21 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /**
+ * Turns a low-level failure into something a visitor can act on.
+ *
+ * A stalled attempt surfaces as "This operation was aborted", which means
+ * nothing to a shopper — the real story is that the model started (or never
+ * started) and then went quiet, so we gave up. Say that instead.
+ */
+function describeFailure(error: Error | null): string {
+  if (!error) return "All AI providers failed to respond."
+  if (error.name === "AbortError" || /abort/i.test(error.message)) {
+    return "The assistant took too long to respond. Please try again."
+  }
+  return error.message
+}
+
+/**
  * Runs the request against each configured provider in order, moving to the next
  * one only when the current provider cannot start (network error, non-2xx,
  * missing key). Once a provider has emitted text we stay on it — switching
@@ -177,7 +192,7 @@ export function streamWithFallback(
         } catch (err) {
           errorRef = err instanceof Error ? err : new Error(String(err))
           if (emitted) {
-            yield { type: "error", message: errorRef.message }
+            yield { type: "error", message: describeFailure(errorRef) }
             return
           }
 
@@ -197,7 +212,7 @@ export function streamWithFallback(
 
     yield {
       type: "error",
-      message: errorRef?.message ?? "All AI providers failed to respond.",
+      message: describeFailure(errorRef),
     }
   })()
 
