@@ -109,10 +109,17 @@ async function main(): Promise<void> {
         for (const e of report.errors) process.stdout.write(`    ${e}\n`)
       }
       if (report.discovered === 0) {
+        // A tools-only site (e.g. a private dashboard) has nothing public to
+        // crawl — its answers come from tools, not from indexed pages. That is
+        // a valid, deliberately empty index, not a failure. A site with neither
+        // pages nor tools, though, is a genuine misconfiguration.
+        const hasTools = config.tools.length > 0
         process.stdout.write(
-          "\n  No pages were indexed. Check that the site is reachable and that site.include/site.exclude allow the pages you expect.\n"
+          hasTools
+            ? "\n  No public pages to index — this site answers from its configured tools. The knowledge index is intentionally empty.\n"
+            : "\n  No pages were indexed. Check that the site is reachable and that site.include/site.exclude allow the pages you expect.\n"
         )
-        process.exitCode = 1
+        if (!hasTools) process.exitCode = 1
       } else if (report.failed > 0) {
         // A partial index is a wrong index: the retriever has no way to know a
         // page is missing. Fail loudly so a deploy hook does not treat it as
