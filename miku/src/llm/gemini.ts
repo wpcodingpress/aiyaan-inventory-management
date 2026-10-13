@@ -44,11 +44,10 @@ function apiKey(): string | undefined {
 export function getGeminiModel(config?: ResolvedMikuConfig): string {
   if (config?.llm.model) return config.llm.model
   if (config?.llm.models.gemini) return config.llm.models.gemini
-  // Pinned to a stable, non-preview model that was actually serving at the time
-  // of writing: `gemini-2.0-flash` and `gemini-2.5-flash` both 404 ("no longer
-  // available to new users"), and the full `gemini-3.5-flash` was timing out
-  // while the lite variant answered 5/5. `GEMINI_MODEL` overrides this.
-  return process.env.GEMINI_MODEL || "gemini-3.5-flash-lite"
+  // Free-tier availability flips between these names week to week, so this is
+  // only the *first* model tried — `geminiModelCandidates` then falls back
+  // through the others when it 404s or 503s. `GEMINI_MODEL` overrides the pick.
+  return process.env.GEMINI_MODEL || "gemini-3.5-flash"
 }
 
 /**
@@ -61,7 +60,7 @@ export function getGeminiModel(config?: ResolvedMikuConfig): string {
  * them constantly; a name that 404s today is simply skipped.
  */
 const GEMINI_FALLBACK_MODELS = [
-  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
   "gemini-flash-latest",
   "gemini-flash-lite-latest",
 ]

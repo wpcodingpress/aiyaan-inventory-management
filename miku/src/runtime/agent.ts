@@ -306,10 +306,16 @@ function buildUserContextBlock(
     availableTools: available,
   })
 
+  // When tools are available, "nothing matched" is not a dead end: the answer
+  // may live in a tool (a catalogue, a stock level, an account lookup). The
+  // old guard told the model to hand the visitor to the team, which made a
+  // tools-only site refuse every question even though it could call a tool.
   const guard = ungrounded
-    ? retrievalOk
-      ? "\n\nIMPORTANT: Nothing on this website matches the visitor's question. Do not answer from general knowledge about the industry. Tell the visitor plainly that this information is not published here, and offer to pass them to the team."
-      : "\n\nIMPORTANT: The knowledge search is temporarily unavailable. Tell the visitor you cannot verify this right now and offer to pass them to the team. Do not guess."
+    ? available.length > 0
+      ? "\n\nIMPORTANT: The indexed site content did not match this question (a site with no public pages legitimately has an empty index). You DO have tools listed under your capabilities — call the tool that fits and answer from its real result before replying. Do not invent data, and do not decline just because SITE KNOWBASE is empty."
+      : retrievalOk
+        ? "\n\nIMPORTANT: Nothing on this website matches the visitor's question. Do not answer from general knowledge about the industry. Tell the visitor plainly that this information is not published here, and offer to pass them to the team."
+        : "\n\nIMPORTANT: The knowledge search is temporarily unavailable. Tell the visitor you cannot verify this right now and offer to pass them to the team. Do not guess."
     : ""
 
   return `VISITOR QUESTION:\n${question}\n\n---\n${block}${guard}`
