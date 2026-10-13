@@ -59,7 +59,7 @@ const RETRY_BACKOFF_MS = [700, 2000]
  * ceiling reads as the reply hanging forever — the same failure the vector leg
  * had. Reset by every chunk, so a long answer that keeps arriving is never cut.
  */
-const PROVIDER_IDLE_MS = 40_000
+const PROVIDER_IDLE_MS = 30_000
 
 /**
  * Total time one question may spend on providers across every retry.
@@ -68,7 +68,7 @@ const PROVIDER_IDLE_MS = 40_000
  * a minute and a half. Bounding the whole attempt loop keeps the worst case
  * honest while leaving fast failures (a 503 answers in ~2s) all three tries.
  */
-const PROVIDER_BUDGET_MS = 80_000
+const PROVIDER_BUDGET_MS = 60_000
 
 interface AttemptGuard {
   /** Substitute for `opts.signal` — aborts on idle or when the caller aborts. */
@@ -117,21 +117,6 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
     }
     signal?.addEventListener("abort", onAbort, { once: true })
   })
-}
-
-/**
- * Turns a low-level failure into something a visitor can act on.
- *
- * A stalled attempt surfaces as "This operation was aborted", which means
- * nothing to a shopper — the real story is that the model started (or never
- * started) and then went quiet, so we gave up. Say that instead.
- */
-function describeFailure(error: Error | null): string {
-  if (!error) return "All AI providers failed to respond."
-  if (error.name === "AbortError" || /abort/i.test(error.message)) {
-    return "The assistant took too long to respond. Please try again."
-  }
-  return error.message
 }
 
 /**
@@ -192,7 +177,7 @@ export function streamWithFallback(
         } catch (err) {
           errorRef = err instanceof Error ? err : new Error(String(err))
           if (emitted) {
-            yield { type: "error", message: describeFailure(errorRef) }
+            yield { type: "error", message: errorRef.message }
             return
           }
 
@@ -212,7 +197,7 @@ export function streamWithFallback(
 
     yield {
       type: "error",
-      message: describeFailure(errorRef),
+      message: errorRef?.message ?? "All AI providers failed to respond.",
     }
   })()
 
