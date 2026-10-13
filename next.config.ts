@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  transpilePackages: ["@wpcodingpress/miku"],
   experimental: {
     serverActions: {
       bodySizeLimit: '2mb',

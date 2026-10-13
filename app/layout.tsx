@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Providers from "@/components/providers";
 import "./globals.css";
+import "@wpcodingpress/miku/styles.css"
+import { MikuWidget } from "@wpcodingpress/miku/client"
 
 export const metadata: Metadata = {
   title: "Ayan's Crafts — Inventory Management",
@@ -22,6 +24,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen bg-background antialiased">
         <Providers>{children}</Providers>
+        <MikuWidget />
       </body>
     </html>
   );
