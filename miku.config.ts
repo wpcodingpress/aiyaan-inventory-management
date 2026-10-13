@@ -17,11 +17,11 @@ function getPool(): Pool {
 
 export default defineMiku({
   brand: {
-    name: "Aiyaan Footwear",
+    name: "Aiyaan's Footwear",
     assistantName: "MIKU",
     tagline: "Ask us anything",
-    accent: "#e56748",
-    accentAlt: "#3461ea",
+    accent: "#df071c",
+    accentAlt: "#9333ea",
   },
   site: {
     baseUrl: "https://aiyaan-inventory-management.vercel.app",
