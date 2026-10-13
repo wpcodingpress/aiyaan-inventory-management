@@ -272,3 +272,5 @@ export const inventoryTools = [
     },
   }),
 ]
+
+export default inventoryTools
